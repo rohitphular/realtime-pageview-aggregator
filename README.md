@@ -32,7 +32,7 @@ A self-contained, end-to-end streaming pipeline that ingests simulated web-page 
 
 ## Quick Start
 
-Requires Docker, Docker Compose, Java 17, and a POSIX shell with `make`.
+Requires Docker, Docker Compose, Java 17, Maven and a POSIX shell with `make`.
 
 ```shell
 
