@@ -1,6 +1,6 @@
 # realtime-pageview-aggregator
 
-A self-contained, end-to-end streaming pipeline that ingests simulated web-page visit events, aggregates them in real time by UK postcode over tumbling event-time windows, and writes three output streams — raw, aggregated, and a dead-letter queue — to the local filesystem.
+Streaming pipeline that ingests simulated web-page visit events, aggregates them by UK postcode over tumbling event-time windows, and writes three output streams — raw, aggregated, and dead-letter queue — to the local filesystem.
 
 ## Table of Contents
 - [Architecture](#architecture)
@@ -67,9 +67,9 @@ To tear down: `make down`
 
 ## The Mission
 
-The system models a scenario where a website receives up to 100,000 page visits per day across a set of UK postcodes. Each visit is a JSON event containing a user ID, postcode, URL path, and Unix epoch-second timestamp. The pipeline answers: "How many page views did each postcode receive within each one-minute window?"
+A website receives up to 100,000 page visits per day across a set of UK postcodes. Each visit is a JSON event containing a user ID, postcode, URL path, and Unix epoch-second timestamp. The pipeline answers: "How many page views did each postcode receive within each one-minute window?"
 
-Design constraints that shaped the implementation:
+Constraints:
 
 - **Event-time semantics**: events carry their own timestamp; the aggregation must be correct regardless of producer-to-broker delivery jitter.
 - **Exactly-once output**: Flink checkpoints at EXACTLY_ONCE mode ensure exactly-once semantics from Kafka source to file sink. Note: the producer-to-Kafka leg uses idempotent sends within a single session, which resets on container restart; end-to-end exactly-once is therefore conditional on stable producer session lifecycle.
@@ -81,13 +81,13 @@ Design constraints that shaped the implementation:
 
 ## Design Rationale
 
-This pipeline is built as a streaming reference architecture — Kafka as the durable, replayable event bus and Flink as the stateful stream processor — because that pairing establishes the correct foundation for event-time correctness, exactly-once guarantees, and horizontal scalability. The design is scalability-first: every structural decision (partitioned topic, keyed stream, checkpointed state, side-output DLQ) is made to hold at production load, not just at the current demo rate.
+Kafka as the durable event bus, Flink as the stateful stream processor. That pairing gives event-time correctness, exactly-once guarantees, and horizontal scalability out of the box. Every structural decision (partitioned topic, keyed stream, checkpointed state, side-output DLQ) is made to hold at production load, not just at the current demo rate.
 
-Three properties make this the right architecture for this problem class:
+Why this stack:
 
-1. **Streaming fundamentals are the target competency.** The assessment is designed to evaluate event-time semantics, watermarks, windowed aggregation, and exactly-once processing. A batch or serverless approach would produce the correct output but would not exercise any of those properties. Kafka and Flink are the natural fit.
+1. **Streaming fundamentals are the target competency.** The problem requires event-time semantics, watermarks, windowed aggregation, and exactly-once processing. A batch or serverless approach would produce the correct output but would not exercise any of those properties.
 2. **The pipeline scales horizontally without a rewrite.** Increasing throughput by an order of magnitude is a configuration change — more partitions, more TaskManagers, higher parallelism. No operator logic changes.
-3. **Operational observability is a first-class citizen.** Prometheus metrics, Grafana dashboards, consumer lag alerting, and DLQ tracking are native to this stack. Equivalent coverage on a serverless batch pipeline requires assembling CloudWatch, X-Ray, and custom metric adapters.
+3. **Observability comes for free.** Prometheus metrics, Grafana dashboards, consumer lag alerting, and DLQ tracking are native to this stack. Equivalent coverage on a serverless batch pipeline requires assembling CloudWatch, X-Ray, and custom metric adapters.
 
 ### Scaling Envelope
 
@@ -98,7 +98,7 @@ Three properties make this the right architecture for this problem class:
 | Mid-scale hardening | ~10K–100K events/sec | Schema Registry + Avro, `RocksDBStateBackend` with incremental checkpointing, S3 checkpoint storage |
 | High-scale production | 100K+ events/sec | Multi-broker Kafka cluster (`replication-factor=3`), dedicated Flink cluster, S3 sinks with compaction and lifecycle policies |
 
-At the current volume of ~108,000 events/day, a scheduled Lambda or Kafka Connect sink would be the pragmatic choice for a greenfield system with no growth expectation. The streaming stack is the deliberate choice here because the architecture needs to be correct before it needs to be minimal.
+At the current volume of ~108,000 events/day, a scheduled Lambda or Kafka Connect sink would be the pragmatic choice for a greenfield system with no growth expectation. The streaming stack is chosen here because the architecture needs to be correct before it needs to be minimal.
 
 ---
 
@@ -182,7 +182,7 @@ realtime-pageview-aggregator/
 
 ## Pipeline Architecture
 
-For a visual representation of how data flows through the pipeline — from the Spring Boot producer through the Kafka broker, Flink operator graph, and into the three output sinks — refer to the data-flow diagram in the `docs/` folder. The diagram also shows where the DLQ side-output branches off and how watermarks are applied post-parse.
+The data-flow diagram in the `document/` folder shows the full path from the Spring Boot producer through the Kafka broker, Flink operator graph, and into the three output sinks — including where the DLQ side-output branches off and how watermarks are applied post-parse.
 
 The five operator branches in `PageviewAggregatorJob` are: raw passthrough sink, JSON parse with DLQ routing, watermark assignment, tumbling window aggregation, and late-data capture. Each is a named node visible in the Flink UI's job graph view.
 
@@ -253,7 +253,7 @@ The `dlq_routed_count` Flink metric tracks total DLQ emissions and is scraped by
 
 ### Retention Policy
 
-**Kafka topic retention.** The `pageviews-raw` topic uses Kafka's default `retention.ms` of 604800000 (168 hours / 7 days) with delete-based cleanup. Log compaction is intentionally not enabled: compaction retains only the latest record per key, which would discard the time-series history the pipeline depends on — every event is a distinct observation, not a mutable state update. At 108K events/day with approximately 150 bytes per event, 7 days of retention consumes roughly 110 MB, negligible for a single broker. At scale, retention should be tuned to the recovery window: how far back must the Flink job rewind on a cold restart? If checkpoints are healthy and committed offsets are current, 24-hour retention is sufficient; longer retention provides a safety net for extended outages and is the correct default until operational confidence is established.
+**Kafka topic retention.** The `pageviews-raw` topic uses Kafka's default `retention.ms` of 604800000 (168 hours / 7 days) with delete-based cleanup. Log compaction is not enabled because compaction retains only the latest record per key, which would discard the time-series history the pipeline depends on — every event is a distinct observation, not a mutable state update. At 108K events/day with approximately 150 bytes per event, 7 days of retention consumes roughly 110 MB, negligible for a single broker. At scale, retention should be tuned to the recovery window: how far back must the Flink job rewind on a cold restart? If checkpoints are healthy and committed offsets are current, 24-hour retention is sufficient; longer retention provides a safety net for extended outages.
 
 **Output file and DLQ retention.** No lifecycle policy is applied to the `output/` directories. Files accumulate indefinitely. In production with S3 or GCS sinks, object lifecycle rules should enforce explicit limits — for example, 90-day expiry on raw output, 1-year on aggregated, and 30 days on DLQ files. For a Kafka-backed DLQ (see Evolution Path), the DLQ topic should carry a shorter retention than the main topic (e.g., 72 hours) paired with an alerting threshold: if DLQ records are not investigated before the retention window closes, they are permanently lost with no replay path.
 
@@ -306,7 +306,7 @@ KRaft's `StandardAuthorizer` (`authorizer.class.name=org.apache.kafka.metadata.a
 
 ### Metrics
 
-Metrics are collected from two sources: the Flink Prometheus reporter and the Kafka broker JMX exporter.
+Two scrape targets: the Flink Prometheus reporter and the Kafka broker JMX exporter.
 
 **Flink metrics** — the Prometheus reporter is enabled on both `jobmanager` and `taskmanager` via `FLINK_PROPERTIES` (`metrics.reporter.prom.factory.class`, port 9249). Prometheus scrapes both targets every 5 seconds.
 
@@ -363,9 +363,9 @@ Grafana starts on port 3000. The admin password is set from `GF_ADMIN_PASSWORD` 
 
 **Error Budget**
 
-At 99.9% ingestion availability, the error budget is approximately 1.44 minutes of downtime per day or 43 minutes per month. A single TaskManager crash consuming the full RTO (60 seconds) uses ~70% of the daily budget. This means the pipeline tolerates at most one unplanned restart per day before breaching the SLO — reinforcing the importance of checkpoint health monitoring and proactive alerting on consumer lag.
+At 99.9% ingestion availability, the error budget is roughly 1.5 minutes of downtime per day or 43 minutes per month. A single TaskManager crash consuming the full RTO (60 seconds) uses ~70% of the daily budget. This means the pipeline tolerates at most one unplanned restart per day before breaching the SLO — reinforcing the importance of checkpoint health monitoring and proactive alerting on consumer lag.
 
-> **Note:** these SLOs are proposed targets for a production deployment, not enforced guarantees in the current local Docker setup. The monitoring infrastructure (Prometheus + Grafana + alert rules) provides the measurement plane; enforcement requires an incident management process.
+> **Note:** These are production targets, not enforced guarantees in the local Docker setup. The monitoring stack provides measurement; enforcement requires an incident management process.
 
 ### Checkpoint Policy
 
@@ -380,7 +380,7 @@ At 99.9% ingestion availability, the error budget is approximately 1.44 minutes 
 | Max concurrent checkpoints | 1 | Avoids overlapping checkpoint I/O |
 | On cancellation | RETAIN | Checkpoint data survives manual job cancellation for manual recovery |
 
-The job uses `HashMapStateBackend` (the Flink default). This is deliberate: window state per postcode is negligible — 6 postcodes, each holding a single long accumulator — so there is no justification for the operational overhead of RocksDB. `RocksDBStateBackend` is the correct production choice when state grows beyond JVM heap (e.g., large keyed state, long retention windows, or high-cardinality key spaces) or when incremental checkpointing is needed to reduce checkpoint size. Checkpoint storage in this setup writes to the local mounted filesystem (`/opt/flink/output`). In a production deployment this path would target S3 or GCS for durability and cross-node accessibility.
+The job uses `HashMapStateBackend` (the Flink default). Window state per postcode is negligible — 6 postcodes, each holding a single long accumulator — so there is no justification for the operational overhead of RocksDB. `RocksDBStateBackend` is the correct production choice when state grows beyond JVM heap (e.g., large keyed state, long retention windows, or high-cardinality key spaces) or when incremental checkpointing is needed to reduce checkpoint size. Checkpoint storage in this setup writes to the local mounted filesystem (`/opt/flink/output`). In a production deployment this path would target S3 or GCS for durability and cross-node accessibility.
 
 > **Note:** Lowering the 10-second checkpoint interval reduces recovery point objective but increases I/O pressure on the TaskManager. The 5-second min-pause is a guard against checkpoint storms under sustained backpressure.
 
@@ -397,7 +397,7 @@ This tails `docker compose logs -f taskmanager`. Parser DLQ warnings, window clo
 
 ## Automation
 
-The entire pipeline lifecycle is driven by a single `Makefile` with no manual steps between clone and running pipeline.
+A single `Makefile` drives the full lifecycle — no manual steps between clone and running pipeline.
 
 `make all` chains six targets in sequence: `build` → `up` → `wait-for-kafka` → `create-topic` → `wait-for-flink` → `submit-job`. Each target is idempotent and can be re-run independently.
 
@@ -412,23 +412,6 @@ The entire pipeline lifecycle is driven by a single `Makefile` with no manual st
 | `make submit-job` | Submit the streaming job to the Flink cluster in detached mode |
 | `make logs` | Tail the Flink TaskManager logs |
 | `make down` | Stop and remove all Docker containers |
-
-Key commands to copy-paste:
-
-```shell
-
-make all
-```
-
-```shell
-
-make logs
-```
-
-```shell
-
-make down
-```
 
 > **Note:** `auto.create.topics.enable` is set to `false` on the broker. Without this, the producer races the `create-topic` target and Kafka silently creates the topic with 1 partition instead of 3.
 
@@ -458,7 +441,7 @@ If a checkpoint fails, in-progress files are discarded and the operator state is
 
 The rolling policy (1 minute elapsed / 30 seconds idle / 10 MB) means that at low throughput — such as the current 1.25 events/second — files roll on the idle timeout rather than on size, producing many small part files. This is a known trade-off documented in Known Gaps.
 
-On a local Docker host-mounted filesystem, the two-phase commit depends on the OS honouring `fsync` and atomic rename semantics. An abrupt Docker daemon crash — as distinct from a Flink task failure — can leave `.pending` files in an indeterminate state that Flink's recovery logic cannot automatically resolve. This is acceptable for local development and functional testing. In production, the `FileSink` should target S3 or HDFS, where atomic rename and commit guarantees are well-defined and battle-tested across large-scale deployments.
+On a local Docker host-mounted filesystem, the two-phase commit depends on the OS honouring `fsync` and atomic rename semantics. An abrupt Docker daemon crash — as distinct from a Flink task failure — can leave `.pending` files in an indeterminate state that Flink's recovery logic cannot automatically resolve. This is acceptable for local development and functional testing. In production, the `FileSink` should target S3 or HDFS, where atomic rename and commit guarantees are well-defined.
 
 > **Note:** The `.inprogress` and `.pending` files visible in `output/` during a running job are normal. They become permanent part files after the next checkpoint completes.
 
@@ -556,9 +539,9 @@ The Kafka topic is pre-created with 3 partitions. The producer keys each message
 
 ### Partitioning Strategy
 
-The topic is configured with 3 partitions despite the pipeline operating over a 6-postcode key space. This is deliberate. Partition count and business key cardinality are orthogonal concerns, and coupling them is a common architectural mistake. The 3-partition choice proves that point directly: the same design works with 6 postcodes, 600, or 6 million — the partition topology does not change because the key space changes.
+The topic is configured with 3 partitions despite the pipeline operating over a 6-postcode key space. Partition count and business key cardinality are orthogonal concerns, and coupling them is a common mistake. The 3-partition choice proves that point directly: the same design works with 6 postcodes, 600, or 6 million — the partition topology does not change because the key space changes.
 
-Kafka's default murmur2 partitioner hashes each message key and assigns it to a partition via modulo. With 6 postcodes and 3 partitions, each partition holds approximately 2 postcodes. Crucially, all events for a given postcode always land in the same partition. Flink's `keyBy(postcode)` then enforces per-key routing within the Flink operator graph, independent of which physical partition the events arrived from. There is no requirement for a 1:1 partition-to-key mapping. Kafka guarantees per-key ordering within a partition; Flink guarantees per-key state isolation via `keyBy`. The two layers of routing are composable, not redundant.
+Kafka's default murmur2 partitioner hashes each message key and assigns it to a partition via modulo. With 6 postcodes and 3 partitions, each partition holds approximately 2 postcodes. The important part: all events for a given postcode always land in the same partition. Flink's `keyBy(postcode)` then enforces per-key routing within the Flink operator graph, independent of which physical partition the events arrived from. There is no requirement for a 1:1 partition-to-key mapping. Kafka guarantees per-key ordering within a partition; Flink guarantees per-key state isolation via `keyBy`. The two layers of routing are composable, not redundant.
 
 **Headroom.** The current load is 1.25 events/second across the entire pipeline. A single Flink slot running this operator graph — Kafka source, watermark assignment, `keyBy(postcode)`, tumbling window, `CountAggregator`, and `FileSink` — sustains approximately 5,000–10,000 events/second before CPU becomes a constraint. With 3 partitions and 1 active slot, the architecture has three to four orders of magnitude of headroom before partitioning becomes the limiting factor.
 
@@ -673,7 +656,7 @@ The dominant cost driver at scale is the Kafka broker tier, not the Flink comput
 
 ## Known Gaps
 
-These are honest gaps, not oversights. Most were skipped because they add meaningful complexity that is disproportionate for a local assessment pipeline.
+Items below were scoped out of this implementation. Most add operational complexity that doesn't validate any streaming logic in a local Docker pipeline.
 
 - **Multi-region failover**: the Kafka cluster is a single-node, single-replica broker (`replication-factor=1`). Topic data is lost if the broker container is removed. A production setup requires at minimum three brokers and `replication-factor=3`, `min.insync.replicas=2`. See Scaling the Kafka Tier for the target ISR configuration (`replication.factor=3`, `min.insync.replicas=2`, `acks=all`) and the full broker outage behavior matrix.
 
@@ -683,7 +666,7 @@ These are honest gaps, not oversights. Most were skipped because they add meanin
 
 - **Output compaction**: the `FileSink` rolling policy produces many small part files (one per parallelism slot per roll interval). At the current idle-timeout rolling rate, each output directory accumulates a large number of files that are unsuitable for direct analytical queries. A production deployment would address this in two ways: (1) Hive-style date/hour partitioning on the output path so that compaction jobs can target a bounded time range without scanning all files, and (2) S3 lifecycle policies to transition aged part files to cheaper storage tiers or to trigger a compaction Lambda after each partition closes.
 
-- **Transport-layer encryption**: SASL_PLAINTEXT authenticates clients but sends credentials and data in cleartext over the wire. Production deployments require SASL_SSL (TLS). Adding TLS to a local Docker stack requires certificate generation, trust store configuration, and a certificate authority — overhead that does not validate any streaming logic and was deliberately excluded.
+- **Transport-layer encryption**: SASL_PLAINTEXT authenticates clients but sends credentials and data in cleartext over the wire. Production deployments require SASL_SSL (TLS). Adding TLS to a local Docker stack requires certificate generation, trust store configuration, and a certificate authority — overhead that doesn't validate any streaming logic.
 
 - **Kafka UI and Grafana access control**: both are accessible by any user on the network without role-based authentication. Kafka UI inherits admin credentials for read access; Grafana uses a configurable admin password but has no per-user access control.
 
@@ -693,7 +676,7 @@ These are honest gaps, not oversights. Most were skipped because they add meanin
 
 ## Evolution Path
 
-Ordered by implementation priority for a production-readiness path:
+Ordered by priority for production readiness:
 
 1. **Schema Registry + Avro/Protobuf**: replace the raw JSON `SimpleStringSchema` with a schema-registry-aware deserializer. This makes schema evolution explicit and turns silent data-loss bugs (like a renamed field) into hard deployment failures.
 
@@ -701,7 +684,7 @@ Ordered by implementation priority for a production-readiness path:
 
 3. **SASL_SSL transport encryption**: replace SASL_PLAINTEXT with SASL_SSL on all Kafka listeners. This requires generating broker and client keystores/truststores, a CA certificate, and updating the JAAS configuration. For Docker-based development, tools like `cfssl` or a self-signed CA script can automate certificate generation at `make build` time.
 
-4. **Kafka-backed DLQ topic**: in a production environment, DLQ records should be written to a dedicated Kafka topic (e.g., `pageviews-dlq`) rather than a filesystem. This enables real-time alerting on DLQ volume via consumer lag metrics, automated replay pipelines that re-publish corrected records to `pageviews-raw`, and eliminates the reprocessing friction inherent in file-based dead letters. The current file-based DLQ was chosen for this assessment to keep the operator graph self-contained with no additional Kafka topic dependencies.
+4. **Kafka-backed DLQ topic**: in a production environment, DLQ records should be written to a dedicated Kafka topic (e.g., `pageviews-dlq`) rather than a filesystem. This enables real-time alerting on DLQ volume via consumer lag metrics, automated replay pipelines that re-publish corrected records to `pageviews-raw`, and eliminates the reprocessing friction inherent in file-based dead letters. The current file-based DLQ keeps the operator graph self-contained with no additional Kafka topic dependencies.
 
 5. **S3 / GCS output sinks**: replace the local `FileSink` with Flink's `StreamingFileSink` pointing to object storage. The rolling policy is already configured; only the path prefix and credentials change. This also resolves the small-file accumulation problem by enabling S3 lifecycle policies.
 
