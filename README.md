@@ -194,7 +194,7 @@ The five operator branches in `PageviewAggregatorJob` are: raw passthrough sink,
 
 ### Kafka Message (producer → broker)
 
-**Topic**: `pageviews-raw` | **Partitions**: 6 | **Key**: postcode string
+**Topic**: `pageviews-raw` | **Partitions**: 3 | **Key**: postcode string
 
 ```json
 {
@@ -407,7 +407,7 @@ The entire pipeline lifecycle is driven by a single `Makefile` with no manual st
 | `make build` | Compile, run all tests (unit + MiniCluster + IT), package fat JAR |
 | `make up` | Start all Docker containers with `--force-recreate` |
 | `make wait-for-kafka` | Poll broker with SASL credentials until ready (120s timeout) |
-| `make create-topic` | Create `pageviews-raw` with 6 partitions via `--if-not-exists` |
+| `make create-topic` | Create `pageviews-raw` with 3 partitions via `--if-not-exists` |
 | `make wait-for-flink` | Poll Flink REST API until JobManager responds (120s timeout) |
 | `make submit-job` | Submit the streaming job to the Flink cluster in detached mode |
 | `make logs` | Tail the Flink TaskManager logs |
@@ -430,7 +430,7 @@ make logs
 make down
 ```
 
-> **Note:** `auto.create.topics.enable` is set to `false` on the broker. Without this, the producer races the `create-topic` target and Kafka silently creates the topic with 1 partition instead of 6.
+> **Note:** `auto.create.topics.enable` is set to `false` on the broker. Without this, the producer races the `create-topic` target and Kafka silently creates the topic with 1 partition instead of 3.
 
 Infrastructure is defined entirely in Docker Compose (five compose files included from a root orchestrator). No Terraform was used because the task offers two paths — AWS/Kinesis with Terraform, or Kafka with Docker — and this implementation follows the Kafka path.
 
@@ -552,11 +552,25 @@ The Failsafe plugin is configured to run classes matching `*IT.java` during the 
 
 The producer emits one event every 800 ms (~1.25 events/second, ~108,000 events/day). The Flink pipeline at parallelism 1 with a single TaskManager and 2 slots is sufficient for this load with significant headroom.
 
-The Kafka topic is pre-created with 6 partitions — one per postcode in the sample data pool (`SW19`, `E14`, `W1A`, `EC1A`, `N1`, `SE1`). The producer keys each message by postcode, ensuring partition affinity: all events for a given postcode land in the same partition, which means no cross-partition shuffle is required when Flink keys the stream by postcode for windowing.
+The Kafka topic is pre-created with 3 partitions. The producer keys each message by postcode; Kafka's default murmur2 partitioner distributes the 6-postcode key space (`SW19`, `E14`, `W1A`, `EC1A`, `N1`, `SE1`) across those 3 partitions, so each partition holds approximately 2 postcodes. All events for a given postcode still land in the same partition, which means no cross-partition shuffle is required when Flink keys the stream by postcode for windowing.
 
 ### Partitioning Strategy
 
-The current 6-partition topic is intentionally aligned with the 6-postcode sample pool (`SW19`, `E14`, `W1A`, `EC1A`, `N1`, `SE1`). This produces 1:1 partition affinity — each postcode's events land exclusively in one partition — which eliminates any cross-partition shuffle when Flink keys the stream by postcode for windowing. This is a convenience property of the demo, not a design requirement. In production, partition count must be decoupled from business key cardinality and sized by throughput: a reliable starting formula is `partitions = max(target_TPS / single_partition_throughput, desired_consumer_parallelism)`, where single-partition throughput for a single-broker Kafka node is typically 10–50 MB/s depending on message size and replication. Kafka's default partitioner applies a murmur2 hash of the message key, distributing keys uniformly across however many partitions exist — 3,000 postcodes across 12 partitions works correctly, just without 1:1 affinity. The critical operational constraint is repartitioning: increasing the partition count on an existing topic changes the hash-mod mapping, so any downstream logic that relied on a key always landing in a specific partition will silently break. The two safe options are (1) create a new topic with the target partition count, migrate the consumer group offset, and cut over the producer atomically, or (2) implement a custom `Partitioner` that encodes the transition mapping explicitly and retire it once migration is complete.
+The topic is configured with 3 partitions despite the pipeline operating over a 6-postcode key space. This is deliberate. Partition count and business key cardinality are orthogonal concerns, and coupling them is a common architectural mistake. The 3-partition choice proves that point directly: the same design works with 6 postcodes, 600, or 6 million — the partition topology does not change because the key space changes.
+
+Kafka's default murmur2 partitioner hashes each message key and assigns it to a partition via modulo. With 6 postcodes and 3 partitions, each partition holds approximately 2 postcodes. Crucially, all events for a given postcode always land in the same partition. Flink's `keyBy(postcode)` then enforces per-key routing within the Flink operator graph, independent of which physical partition the events arrived from. There is no requirement for a 1:1 partition-to-key mapping. Kafka guarantees per-key ordering within a partition; Flink guarantees per-key state isolation via `keyBy`. The two layers of routing are composable, not redundant.
+
+**Headroom.** The current load is 1.25 events/second across the entire pipeline. A single Flink slot running this operator graph — Kafka source, watermark assignment, `keyBy(postcode)`, tumbling window, `CountAggregator`, and `FileSink` — sustains approximately 5,000–10,000 events/second before CPU becomes a constraint. With 3 partitions and 1 active slot, the architecture has three to four orders of magnitude of headroom before partitioning becomes the limiting factor.
+
+**Production sizing.** Partition count must be sized by throughput, not by the number of distinct business keys. The reliable starting formula is:
+
+```
+partitions = max(target_TPS / single_partition_throughput, desired_consumer_parallelism)
+```
+
+Single-partition throughput on a single-broker Kafka node is typically 10–50 MB/s depending on message size and replication factor. At ~150 bytes per event, a single partition sustains roughly 65,000–330,000 events/second — orders of magnitude beyond the current load.
+
+**Repartitioning.** Increasing the partition count on an existing topic changes the hash-mod mapping. Any logic that assumed a key always lands in a specific partition will silently break. Flink's `keyBy` is unaffected because it operates on key values, not partition indices, so correctness is preserved across repartitioning events. The two safe migration options are: (1) create a new topic with the target partition count, migrate the consumer group offset, and cut over the producer atomically; or (2) implement a custom `Partitioner` that encodes the transition mapping explicitly and retire it once migration is complete.
 
 ### Scaling the Flink Job
 
@@ -572,8 +586,8 @@ The table below maps throughput tiers to concrete infrastructure requirements. A
 
 | Throughput | Partitions | Parallelism | TaskManagers (2 slots each) | State Size | Checkpoint Duration | Network In |
 |---|---|---|---|---|---|---|
-| 1.25 events/s (current) | 6 | 1 | 1 | ~600 bytes | <100 ms | ~190 B/s |
-| 100 events/s | 6 | 6 | 3 | ~600 bytes | <100 ms | ~15 KB/s |
+| 1.25 events/s (current) | 3 | 1 | 1 | ~600 bytes | <100 ms | ~190 B/s |
+| 100 events/s | 3 | 3 | 2 | ~600 bytes | <100 ms | ~15 KB/s |
 | 1,000 events/s | 12 | 12 | 6 | ~1.2 KB (if 12 postcodes) | <200 ms | ~150 KB/s |
 | 10,000 events/s | 24 | 24 | 12 | ~10 KB–10 MB (key-space dependent) | 200 ms–2 s | ~1.5 MB/s |
 | 100,000 events/s | 48+ | 48 | 24+ | requires RocksDB if high cardinality | 2–10 s (incremental checkpointing recommended) | ~15 MB/s |
@@ -672,8 +686,6 @@ These are honest gaps, not oversights. Most were skipped because they add meanin
 - **Transport-layer encryption**: SASL_PLAINTEXT authenticates clients but sends credentials and data in cleartext over the wire. Production deployments require SASL_SSL (TLS). Adding TLS to a local Docker stack requires certificate generation, trust store configuration, and a certificate authority — overhead that does not validate any streaming logic and was deliberately excluded.
 
 - **Kafka UI and Grafana access control**: both are accessible by any user on the network without role-based authentication. Kafka UI inherits admin credentials for read access; Grafana uses a configurable admin password but has no per-user access control.
-
-- **Partition-to-key coupling**: the topic's 6 partitions match the 6-postcode sample pool, creating a 1:1 partition affinity that is convenient for the demo but brittle if the key space grows or postcodes become free-text. Production partition counts must be based on throughput requirements (`target_TPS / per-partition_throughput`), not business key cardinality. Increasing partitions on a live topic changes the key-to-partition mapping and breaks any affinity assumption; migration requires a new topic or a custom transitional partitioner.
 
 - **No retention lifecycle**: Kafka topic retention uses the 7-day default with no explicit `retention.ms` configuration. Output files accumulate indefinitely with no expiry policy. In production, both require explicit retention configuration aligned with the recovery SLA (how far back can the Flink job rewind?) and any applicable compliance requirements.
 

@@ -74,7 +74,7 @@ wait-for-kafka: ## Poll Kafka broker until it is ready to accept connections
 	@echo "  Kafka broker is ready."
 	@echo ""
 
-create-topic: ## Create the pageviews-raw Kafka topic (6 partitions, 1 per postcode)
+create-topic: ## Create the pageviews-raw Kafka topic (3 partitions)
 	@echo ""
 	@echo "========================================="
 	@echo "  Creating Kafka topic '$(KAFKA_TOPIC)'..."
