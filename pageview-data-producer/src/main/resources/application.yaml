@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: pageview-data-producer
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      acks: all
+      retries: 10
+      properties:
+        # idempotence + max.in.flight=5 together give exactly-once delivery semantics during retries
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
+        sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+        sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_PRODUCER_USERNAME}" password="${KAFKA_PRODUCER_PASSWORD}";
+
+app:
+  kafka:
+    topic: pageviews-raw
+
+  generator:
+    rate-ms: 800

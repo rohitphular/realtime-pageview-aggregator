@@ -1,0 +1,9 @@
+include:
+  - docker-compose.kafka.yaml
+  - docker-compose.flink.yaml
+  - docker-compose.observability.yaml
+  - docker-compose.app.yaml
+
+networks:
+  data-tier:
+    driver: bridge

@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'flink'
+    static_configs:
+      - targets: ['jobmanager:9249', 'taskmanager:9249']
+
+  # scrapes the jmx exporter sidecar; connects to kafka on port 9101 over rmi,
+  # exposes broker mbeans as prometheus metrics on port 5556.
+  - job_name: 'kafka-broker'
+    static_configs:
+      - targets: ['kafka-jmx-exporter:5556']

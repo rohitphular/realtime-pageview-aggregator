@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{ISO8601} %-5p [%t] %c{1} - %m%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <!-- Suppress noisy Flink internals during tests -->
+        <Root level="WARN">
+            <AppenderRef ref="Console"/>
+        </Root>
+        <!-- Application-level logging at DEBUG for test visibility -->
+        <Logger name="com.pipeline.streaming" level="DEBUG" additivity="false">
+            <AppenderRef ref="Console"/>
+        </Logger>
+    </Loggers>
+</Configuration>

@@ -1,0 +1,78 @@
+---
+# standalone jmx exporter config for the confluent kafka broker (cp-kafka:7.6.0).
+# hostname and port must match the kafka container name and KAFKA_JMX_PORT.
+
+hostPort: kafka-broker:9101
+startDelaySeconds: 10
+ssl: false
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+attrNameSnakeCase: true
+
+rules:
+
+  # broker-level throughput: messages/bytes in/out per sec, aggregated across all topics
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=(MessagesInPerSec|BytesInPerSec|BytesOutPerSec|BytesRejectedPerSec|FailedProduceRequestsPerSec|FailedFetchRequestsPerSec)><>(Count|OneMinuteRate|FiveMinuteRate|FifteenMinuteRate|MeanRate)"
+    name: kafka_server_broker_topic_metrics_$1_$2
+    labels: {}
+
+  # per-topic throughput: same metrics but with a topic label
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=(MessagesInPerSec|BytesInPerSec|BytesOutPerSec|BytesRejectedPerSec|FailedProduceRequestsPerSec|FailedFetchRequestsPerSec), topic=(.+)><>(Count|OneMinuteRate|FiveMinuteRate|FifteenMinuteRate|MeanRate)"
+    name: kafka_server_broker_topic_metrics_$1_$3
+    labels:
+      topic: "$2"
+
+  # request handler thread pool idle ratio — low values indicate cpu saturation
+  - pattern: "kafka.server<type=KafkaRequestHandlerPool, name=RequestHandlerAvgIdlePercent><>(OneMinuteRate)"
+    name: kafka_server_request_handler_avg_idle_percent
+    labels: {}
+
+  # network request latency and rate per request type (Produce, Fetch, Metadata, etc.)
+  - pattern: "kafka.network<type=RequestMetrics, name=(RequestsPerSec|TotalTimeMs|RequestQueueTimeMs|ResponseQueueTimeMs|RemoteTimeMs|ThrottleTimeMs), request=(.+)><>(Count|OneMinuteRate|50thPercentile|95thPercentile|99thPercentile|999thPercentile|Mean)"
+    name: kafka_network_request_metrics_$1_$3
+    labels:
+      request: "$2"
+
+  # log flush latency — high values indicate disk i/o pressure
+  - pattern: "kafka.log<type=LogFlushStats, name=LogFlushRateAndTimeMs><>(Count|OneMinuteRate|50thPercentile|95thPercentile|99thPercentile|Mean)"
+    name: kafka_log_flush_rate_and_time_ms_$1
+    labels: {}
+
+  # partition and replica state — under-replicated and offline partitions
+  - pattern: "kafka.server<type=ReplicaManager, name=(UnderReplicatedPartitions|OfflineReplicaCount|PartitionCount|LeaderCount|UnderMinIsrPartitionCount)><>(Value)"
+    name: kafka_server_replica_manager_$1
+    labels: {}
+
+  # log size on disk per topic-partition
+  - pattern: "kafka.log<type=Log, name=Size, topic=(.+), partition=(.+)><>(Value)"
+    name: kafka_log_size_bytes
+    labels:
+      topic: "$1"
+      partition: "$2"
+
+  # log end offset (high-watermark) per partition
+  - pattern: "kafka.log<type=Log, name=LogEndOffset, topic=(.+), partition=(.+)><>(Value)"
+    name: kafka_log_end_offset
+    labels:
+      topic: "$1"
+      partition: "$2"
+
+  # controller state — there should always be exactly one active controller
+  - pattern: "kafka.controller<type=KafkaController, name=(ActiveControllerCount|OfflinePartitionsCount|PreferredReplicaImbalanceCount)><>(Value)"
+    name: kafka_controller_$1
+    labels: {}
+
+  # kraft (zookeeper-less) metadata metrics — available in cp-kafka 7.x
+  - pattern: "kafka.server<type=raft-metrics, name=(.+)><>(Value)"
+    name: kafka_server_raft_metrics_$1
+    labels: {}
+
+  # jvm memory and gc — useful to detect broker jvm heap pressure
+  - pattern: "java.lang<type=Memory><HeapMemoryUsage>(used|committed|max)"
+    name: jvm_memory_heap_$1_bytes
+    labels: {}
+
+  - pattern: "java.lang<type=GarbageCollector, name=(.+)><>(CollectionCount|CollectionTime)"
+    name: jvm_gc_$2_total
+    labels:
+      gc: "$1"

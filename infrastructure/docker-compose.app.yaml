@@ -1,0 +1,17 @@
+services:
+  pageview-producer:
+    build:
+      context: ../pageview-data-producer
+      dockerfile: Dockerfile
+    container_name: pageview-producer
+    networks:
+      - data-tier
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-broker:29092
+      - KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
+      - KAFKA_SASL_MECHANISM=PLAIN
+      - KAFKA_PRODUCER_USERNAME=${KAFKA_PRODUCER_USERNAME}
+      - KAFKA_PRODUCER_PASSWORD=${KAFKA_PRODUCER_PASSWORD}
+    depends_on:
+      kafka:
+        condition: service_healthy
