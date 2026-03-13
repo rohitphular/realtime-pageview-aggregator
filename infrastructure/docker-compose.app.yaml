@@ -12,6 +12,9 @@ services:
       - KAFKA_SASL_MECHANISM=PLAIN
       - KAFKA_PRODUCER_USERNAME=${KAFKA_PRODUCER_USERNAME}
       - KAFKA_PRODUCER_PASSWORD=${KAFKA_PRODUCER_PASSWORD}
+      - SCHEMA_REGISTRY_URL=http://schema-registry:8081
     depends_on:
       kafka:
+        condition: service_healthy
+      schema-registry:
         condition: service_healthy

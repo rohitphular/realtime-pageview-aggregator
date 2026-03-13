@@ -1,16 +1,15 @@
 package com.pipeline.streaming.processor;
 
+import com.pipeline.streaming.avro.PageviewEvent;
 import com.pipeline.streaming.processor.config.CheckpointConfigurer;
 import com.pipeline.streaming.processor.config.CredentialHelper;
 import com.pipeline.streaming.processor.config.JobParameters;
-import com.pipeline.streaming.processor.model.PageviewEvent;
 import com.pipeline.streaming.processor.operator.CountAggregator;
 import com.pipeline.streaming.processor.operator.WindowResultFormatter;
 import com.pipeline.streaming.processor.sink.FileSinkFactory;
 import com.pipeline.streaming.processor.source.KafkaSourceFactory;
-import com.pipeline.streaming.processor.util.JsonParserProcessFunction;
 import com.pipeline.streaming.processor.util.PageviewWatermarkStrategy;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import com.pipeline.streaming.processor.util.ValidatingProcessFunction;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.connector.file.sink.FileSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
@@ -40,7 +39,7 @@ public class PageviewAggregatorJob {
 
         CheckpointConfigurer.configure(env);
 
-        KafkaSource<String> source = KafkaSourceFactory.build(params);
+        KafkaSource<PageviewEvent> source = KafkaSourceFactory.build(params);
         FileSink<String> rawSink = FileSinkFactory.build(params.getRawOutputPath());
         FileSink<String> aggSink = FileSinkFactory.build(params.getAggOutputPath());
         FileSink<String> dlqSink = FileSinkFactory.build(params.getDlqOutputPath());
@@ -48,24 +47,27 @@ public class PageviewAggregatorJob {
         final OutputTag<String> dlqTag = new OutputTag<>("dlq-messages") {};
         final OutputTag<PageviewEvent> lateDataTag = new OutputTag<>("late-data") {};
 
-        /* noWatermarks() here because the source emits raw strings — timestamps aren't available until after json parsing */
-        DataStream<String> rawKafkaStream = env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source");
+        /* with avro deserialization at the source, timestamps are available immediately —
+         * watermarks at source level enables per-partition watermark tracking */
+        DataStream<PageviewEvent> eventStream = env.fromSource(
+                source, PageviewWatermarkStrategy.build(), "Kafka Source (Avro)");
 
-        rawKafkaStream.sinkTo(rawSink).name("Raw Data Sink");
+        eventStream.map(PageviewEvent::toString)
+                .sinkTo(rawSink)
+                .name("Raw Data Sink");
 
-        SingleOutputStreamOperator<PageviewEvent> parsedStream = rawKafkaStream
-                .process(new JsonParserProcessFunction(dlqTag))
-                .name("JSON Parser (with DLQ)");
+        SingleOutputStreamOperator<PageviewEvent> validatedStream = eventStream
+                .process(new ValidatingProcessFunction(dlqTag))
+                .name("Event Validator (with DLQ)");
 
-        parsedStream.getSideOutput(dlqTag)
+        validatedStream.getSideOutput(dlqTag)
                 .sinkTo(dlqSink)
                 .name("DLQ Sink");
 
         /* allowedLateness(30s) gives the window state a grace period after the watermark passes window end;
          * anything arriving beyond that 30s goes to lateDataTag and ends up in the dlq sink */
-        SingleOutputStreamOperator<String> aggStream = parsedStream
-                .assignTimestampsAndWatermarks(PageviewWatermarkStrategy.build())
-                .keyBy(PageviewEvent::getPostcode)
+        SingleOutputStreamOperator<String> aggStream = validatedStream
+                .keyBy(event -> event.getPostcode())
                 .window(TumblingEventTimeWindows.of(Duration.ofMinutes(params.getWindowMinutes())))
                 .allowedLateness(Duration.ofSeconds(30))
                 .sideOutputLateData(lateDataTag)
@@ -81,8 +83,8 @@ public class PageviewAggregatorJob {
     }
 
     /* package-private overload wires the same topology onto an in-memory stream so integration tests
-     * can run against the minicluster without needing a real kafka or filesystem */
-    static void wireTopology(DataStream<String> rawStream, long windowMinutes,
+     * can run against the minicluster without needing a real kafka, schema registry, or filesystem */
+    static void wireTopology(DataStream<PageviewEvent> eventStream, long windowMinutes,
                              OutputTag<String> dlqTag,
                              SinkFunction<String> rawSink,
                              SinkFunction<String> aggSink,
@@ -90,19 +92,21 @@ public class PageviewAggregatorJob {
 
         final OutputTag<PageviewEvent> lateDataTag = new OutputTag<>("late-data") {};
 
-        rawStream.addSink(rawSink).name("Raw Data Sink");
+        eventStream.map(PageviewEvent::toString)
+                .addSink(rawSink)
+                .name("Raw Data Sink");
 
-        SingleOutputStreamOperator<PageviewEvent> parsedStream = rawStream
-                .process(new JsonParserProcessFunction(dlqTag))
-                .name("JSON Parser (with DLQ)");
+        SingleOutputStreamOperator<PageviewEvent> validatedStream = eventStream
+                .assignTimestampsAndWatermarks(PageviewWatermarkStrategy.build())
+                .process(new ValidatingProcessFunction(dlqTag))
+                .name("Event Validator (with DLQ)");
 
-        parsedStream.getSideOutput(dlqTag)
+        validatedStream.getSideOutput(dlqTag)
                 .addSink(dlqSink)
                 .name("DLQ Sink");
 
-        SingleOutputStreamOperator<String> aggStream = parsedStream
-                .assignTimestampsAndWatermarks(PageviewWatermarkStrategy.build())
-                .keyBy(PageviewEvent::getPostcode)
+        SingleOutputStreamOperator<String> aggStream = validatedStream
+                .keyBy(event -> event.getPostcode())
                 .window(TumblingEventTimeWindows.of(Duration.ofMinutes(windowMinutes)))
                 .allowedLateness(Duration.ofSeconds(30))
                 .sideOutputLateData(lateDataTag)

@@ -15,6 +15,7 @@ services:
         metrics.reporter.prom.port: 9249
       - KAFKA_FLINK_USERNAME=${KAFKA_FLINK_USERNAME}
       - KAFKA_FLINK_PASSWORD=${KAFKA_FLINK_PASSWORD}
+      - SCHEMA_REGISTRY_URL=http://schema-registry:8081
       # flink 1.20.x uses deep reflection into java.base internals — without these add-opens the job
       # fails at startup with InaccessibleObjectException on Collections$UnmodifiableMap
       - >-

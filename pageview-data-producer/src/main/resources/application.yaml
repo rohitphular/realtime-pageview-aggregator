@@ -7,7 +7,7 @@ spring:
 
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
       acks: all
       retries: 10
       properties:
@@ -18,6 +18,11 @@ spring:
         security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
         sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
         sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_PRODUCER_USERNAME}" password="${KAFKA_PRODUCER_PASSWORD}";
+
+        # Schema Registry
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085}
+        auto.register.schemas: true
+        value.subject.name.strategy: io.confluent.kafka.serializers.subject.TopicNameStrategy
 
 app:
   kafka:

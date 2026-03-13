@@ -1,6 +1,6 @@
 package com.pipeline.streaming.processor.operator;
 
-import com.pipeline.streaming.processor.model.PageviewEvent;
+import com.pipeline.streaming.avro.PageviewEvent;
 import org.apache.flink.api.common.functions.AggregateFunction;
 
 

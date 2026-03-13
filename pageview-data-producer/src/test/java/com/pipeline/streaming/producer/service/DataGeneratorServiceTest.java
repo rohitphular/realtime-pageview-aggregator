@@ -1,6 +1,6 @@
 package com.pipeline.streaming.producer.service;
 
-import com.pipeline.streaming.producer.model.PageviewEvent;
+import com.pipeline.streaming.avro.PageviewEvent;
 import lombok.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;

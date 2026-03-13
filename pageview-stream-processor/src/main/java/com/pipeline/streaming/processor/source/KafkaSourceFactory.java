@@ -1,7 +1,7 @@
 package com.pipeline.streaming.processor.source;
 
+import com.pipeline.streaming.avro.PageviewEvent;
 import com.pipeline.streaming.processor.config.JobParameters;
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -13,13 +13,13 @@ public final class KafkaSourceFactory {
     private KafkaSourceFactory() {
     }
 
-    public static KafkaSource<String> build(JobParameters params) {
-        return KafkaSource.<String>builder()
+    public static KafkaSource<PageviewEvent> build(JobParameters params) {
+        return KafkaSource.<PageviewEvent>builder()
                 .setBootstrapServers(params.getBootstrapServers())
                 .setTopics(params.getKafkaTopic())
                 .setGroupId(params.getKafkaGroupId())
                 .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
-                .setValueOnlyDeserializer(new SimpleStringSchema())
+                .setValueOnlyDeserializer(new FaultTolerantAvroDeserializer(params.getSchemaRegistryUrl()))
                 .setProperty("security.protocol", "SASL_PLAINTEXT")
                 .setProperty("sasl.mechanism", "PLAIN")
                 .setProperty("sasl.jaas.config",

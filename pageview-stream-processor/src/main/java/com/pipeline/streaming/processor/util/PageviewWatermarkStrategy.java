@@ -1,12 +1,12 @@
 package com.pipeline.streaming.processor.util;
 
-import com.pipeline.streaming.processor.model.PageviewEvent;
+import com.pipeline.streaming.avro.PageviewEvent;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 
 import java.time.Duration;
 
-/* applying this post-parse (not at source level) means we lose per-partition watermark tracking;
- * at higher scale a custom KafkaDeserializationSchema would be needed to get source-level watermarks */
+/* with avro deserialization at the source, this strategy can now be applied at source level
+ * enabling per-partition watermark tracking — a real operational improvement at scale */
 public final class PageviewWatermarkStrategy {
 
     private PageviewWatermarkStrategy() {

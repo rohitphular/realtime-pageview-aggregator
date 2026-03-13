@@ -18,7 +18,7 @@ KAFKA_TIMEOUT       = 120
 FLINK_TIMEOUT       = 120
 POLL_INTERVAL       = 5
 
-.PHONY: help build up wait-for-kafka create-topic wait-for-flink submit-job logs down all
+.PHONY: help build up wait-for-kafka create-topic wait-for-schema-registry wait-for-flink submit-job logs down all
 
 help: ## Show this help menu
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -118,6 +118,28 @@ wait-for-flink: ## Poll the Flink REST API until it responds 200
 	@echo "  Flink JobManager is ready."
 	@echo ""
 
+wait-for-schema-registry: ## Poll the Schema Registry until it responds
+	@echo ""
+	@echo "========================================="
+	@echo "  Waiting for Schema Registry..."
+	@echo "========================================="
+	@echo ""
+	@elapsed=0; \
+	until curl -sf http://localhost:8085/subjects > /dev/null 2>&1; do \
+		if [ $$elapsed -ge $(FLINK_TIMEOUT) ]; then \
+			echo ""; \
+			echo "  ERROR: Schema Registry did not become ready within $(FLINK_TIMEOUT)s."; \
+			echo ""; \
+			exit 1; \
+		fi; \
+		echo "  Still waiting... ($${elapsed}s elapsed)"; \
+		sleep $(POLL_INTERVAL); \
+		elapsed=$$((elapsed + $(POLL_INTERVAL))); \
+	done
+	@echo ""
+	@echo "  Schema Registry is ready."
+	@echo ""
+
 submit-job: ## Submit the Flink aggregation job to the local cluster
 	@echo ""
 	@echo "========================================="
@@ -129,16 +151,18 @@ submit-job: ## Submit the Flink aggregation job to the local cluster
 		--bootstrap.servers kafka-broker:29092 \
 		--kafka.topic $(KAFKA_TOPIC) \
 		--kafka.group.id flink-aggregator-group \
+		--schema.registry.url http://schema-registry:8081 \
 		--raw.output.path /opt/flink/output/raw \
 		--agg.output.path /opt/flink/output/aggregated \
 		--dlq.output.path /opt/flink/output/dlq
 	@echo ""
 	@echo "  Flink job submitted!"
 	@echo ""
-	@echo "  Dashboard:     http://localhost:8081"
-	@echo "  Kafka UI:      http://localhost:7070"
-	@echo "  Prometheus:    http://localhost:9090"
-	@echo "  Grafana:       http://localhost:3000"
+	@echo "  Dashboard:         http://localhost:8081"
+	@echo "  Kafka UI:          http://localhost:7070"
+	@echo "  Schema Registry:   http://localhost:8085/subjects/"
+	@echo "  Prometheus:        http://localhost:9090"
+	@echo "  Grafana:           http://localhost:3000"
 	@echo ""
 
 logs: ## Tail the logs for the Flink TaskManager
@@ -155,7 +179,7 @@ down: ## Stop and remove all Docker containers
 	@echo "  All containers stopped."
 	@echo ""
 
-all: build up wait-for-kafka create-topic wait-for-flink submit-job
+all: build up wait-for-kafka create-topic wait-for-schema-registry wait-for-flink submit-job
 	@echo ""
 	@echo "========================================="
 	@echo "  Pipeline is running!"

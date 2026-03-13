@@ -13,6 +13,7 @@
     <description>Streaming pipeline for pageview aggregation using Kafka and Flink</description>
 
     <modules>
+        <module>pageview-schema</module>
         <module>pageview-data-producer</module>
         <module>pageview-stream-processor</module>
     </modules>
@@ -26,8 +27,17 @@
         <flink.kafka.connector.version>3.4.0-1.20</flink.kafka.connector.version>
         <lombok.version>1.18.42</lombok.version>
         <spring-boot.version>4.0.3</spring-boot.version>
-        <testcontainers.version>1.19.7</testcontainers.version>
+        <testcontainers.version>2.0.3</testcontainers.version>
+        <avro.version>1.11.3</avro.version>
+        <confluent.version>7.6.0</confluent.version>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
 
     <dependencyManagement>
         <dependencies>
@@ -66,8 +76,29 @@
             </dependency>
             <dependency>
                 <groupId>org.apache.flink</groupId>
+                <artifactId>flink-avro</artifactId>
+                <version>${flink.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.flink</groupId>
+                <artifactId>flink-avro-confluent-registry</artifactId>
+                <version>${flink.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.flink</groupId>
                 <artifactId>flink-test-utils</artifactId>
                 <version>${flink.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.avro</groupId>
+                <artifactId>avro</artifactId>
+                <version>${avro.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.confluent</groupId>
+                <artifactId>kafka-avro-serializer</artifactId>
+                <version>${confluent.version}</version>
             </dependency>
 
             <dependency>
@@ -75,14 +106,22 @@
                 <artifactId>lombok</artifactId>
                 <version>${lombok.version}</version>
             </dependency>
+            <!-- commons-compress must align with testcontainers 2.x; older versions
+                 pulled by avro/confluent lack the TarArchiveOutputStream API that
+                 testcontainers needs for copyFileToContainer -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>1.28.0</version>
+            </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
-                <artifactId>kafka</artifactId>
+                <artifactId>testcontainers-kafka</artifactId>
                 <version>${testcontainers.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
-                <artifactId>junit-jupiter</artifactId>
+                <artifactId>testcontainers-junit-jupiter</artifactId>
                 <version>${testcontainers.version}</version>
             </dependency>
         </dependencies>

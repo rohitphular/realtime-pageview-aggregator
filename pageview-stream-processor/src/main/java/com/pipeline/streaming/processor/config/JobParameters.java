@@ -16,6 +16,7 @@ public class JobParameters {
     private final String kafkaGroupId;
     private final String kafkaUsername;
     private final String kafkaPassword;
+    private final String schemaRegistryUrl;
     private final long windowMinutes;
 
     public JobParameters(ParameterTool parameters) {
@@ -31,6 +32,7 @@ public class JobParameters {
         this.bootstrapServers = parameters.get("bootstrap.servers", "kafka-broker:29092");
         this.kafkaTopic = parameters.get("kafka.topic", "pageviews-raw");
         this.kafkaGroupId = parameters.get("kafka.group.id", "flink-aggregator-group");
+        this.schemaRegistryUrl = parameters.get("schema.registry.url", "http://schema-registry:8081");
 
         this.kafkaUsername = CredentialHelper.getRequiredEnvOrParam("KAFKA_FLINK_USERNAME", "kafka.sasl.username", parameters, envLookup);
         this.kafkaPassword = CredentialHelper.getRequiredEnvOrParam("KAFKA_FLINK_PASSWORD", "kafka.sasl.password", parameters, envLookup);

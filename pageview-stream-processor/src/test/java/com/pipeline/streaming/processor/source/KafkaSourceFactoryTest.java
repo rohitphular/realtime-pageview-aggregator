@@ -1,5 +1,6 @@
 package com.pipeline.streaming.processor.source;
 
+import com.pipeline.streaming.avro.PageviewEvent;
 import com.pipeline.streaming.processor.config.JobParameters;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.connector.kafka.source.KafkaSource;
@@ -19,10 +20,11 @@ class KafkaSourceFactoryTest {
                 "kafka.topic", "test-topic",
                 "kafka.group.id", "test-group",
                 "kafka.sasl.username", "test-user",
-                "kafka.sasl.password", "p@ss=w0rd!#"
+                "kafka.sasl.password", "p@ss=w0rd!#",
+                "schema.registry.url", "http://localhost:8085"
         )));
 
-        KafkaSource<String> source = KafkaSourceFactory.build(params);
+        KafkaSource<PageviewEvent> source = KafkaSourceFactory.build(params);
         assertThat(source).isNotNull();
     }
 }

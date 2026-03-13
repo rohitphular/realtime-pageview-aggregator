@@ -1,8 +1,8 @@
 package com.pipeline.streaming.producer.service;
 
-import com.pipeline.streaming.producer.model.PageviewEvent;
-import lombok.NonNull;
+import com.pipeline.streaming.avro.PageviewEvent;
 import lombok.extern.slf4j.Slf4j;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -43,15 +43,17 @@ public class DataGeneratorService {
     @Scheduled(fixedRateString = "${app.generator.rate-ms:800}")
     public void generateAndPublishEvent() {
         try {
-            PageviewEvent event = PageviewEvent.builder()
-                    .userId(random.nextLong(10_000L) + 1L)
-                    .postcode(POSTCODES.get(random.nextInt(POSTCODES.size())))
-                    .webpage(WEBPAGES.get(random.nextInt(WEBPAGES.size())))
-                    .timestamp(Instant.now().getEpochSecond())
+            String postcode = POSTCODES.get(random.nextInt(POSTCODES.size()));
+
+            PageviewEvent event = PageviewEvent.newBuilder()
+                    .setUserId(random.nextLong(10_000L) + 1L)
+                    .setPostcode(postcode)
+                    .setWebpage(WEBPAGES.get(random.nextInt(WEBPAGES.size())))
+                    .setTimestamp(Instant.now().getEpochSecond())
                     .build();
 
             /* keying by postcode here means flink's keyBy(postcode) won't cause cross-partition shuffles */
-            kafkaTemplate.send(topic, event.getPostcode(), event)
+            kafkaTemplate.send(topic, postcode, event)
                     .whenComplete((result, ex) -> {
                         if (ex != null) {
                             log.error("Async send failed for event [userId={}]: {}", event.getUserId(), ex.getMessage());

@@ -1,6 +1,6 @@
 package com.pipeline.streaming.processor.util;
 
-import com.pipeline.streaming.processor.model.PageviewEvent;
+import com.pipeline.streaming.avro.PageviewEvent;
 import org.apache.flink.api.common.eventtime.TimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.junit.jupiter.api.BeforeEach;

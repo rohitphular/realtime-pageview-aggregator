@@ -1,0 +1,28 @@
+{
+  "namespace": "com.pipeline.streaming.avro",
+  "type": "record",
+  "name": "PageviewEvent",
+  "doc": "A single pageview event emitted when a user views a page. Timestamp is epoch-seconds.",
+  "fields": [
+    {
+      "name": "user_id",
+      "type": "long",
+      "doc": "Unique user identifier"
+    },
+    {
+      "name": "postcode",
+      "type": "string",
+      "doc": "UK postcode area (e.g. SW19, E14)"
+    },
+    {
+      "name": "webpage",
+      "type": "string",
+      "doc": "URL path of the visited page"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "doc": "Event time as Unix epoch seconds"
+    }
+  ]
+}
